@@ -25,6 +25,9 @@ func main() {
 	addr := flag.String("addr", "http://localhost:4646", "NOMAD_ADDR")
 	token := flag.String("token", "asdf1234-asdf1234-asdf1234", "NOMDAD_TOKEN")
 	jobName := flag.String("job-name", "signoz-logspout", "Nomad job name to monitor")
+	insecure := flag.Bool("insecure", false, "Skip TLS verification")
+	cert := flag.String("cert", "", "Path to the TLS certificate file")
+	key := flag.String("key", "", "Path to the TLS key file")
 
 	// Parse flags
 	flag.Parse()
@@ -37,7 +40,9 @@ func main() {
 		Address: *addr,
 		SecretID: *token,		
 		TLSConfig: &api.TLSConfig{
-			Insecure: true,
+			Insecure: *insecure,
+			ClientCert: *cert,
+			ClientKey:  *key,
 		},
 	})
 	if err != nil {
