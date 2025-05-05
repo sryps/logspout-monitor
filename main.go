@@ -25,6 +25,7 @@ func main() {
 	addr := flag.String("addr", "http://localhost:4646", "NOMAD_ADDR")
 	token := flag.String("token", "asdf1234-asdf1234-asdf1234", "NOMDAD_TOKEN")
 	jobName := flag.String("job-name", "signoz-logspout", "Nomad job name to monitor")
+
 	insecure := flag.Bool("insecure", false, "Skip TLS verification")
 	cert := flag.String("cert", "", "Path to the TLS certificate file")
 	key := flag.String("key", "", "Path to the TLS key file")
@@ -32,19 +33,22 @@ func main() {
 	// Parse flags
 	flag.Parse()
 
+	config := api.DefaultConfig()
+	config.Address = *addr
+	config.SecretID = *token
+
+	if *insecure {
+		config.TLSConfig.Insecure = true
+	} else {
+		config.TLSConfig.Insecure = false
+		config.TLSConfig.ClientCert = *cert
+		config.TLSConfig.ClientKey = *key
+	}
 
 	fmt.Println("Starting Nomad Logspout Client Monitor...")
 
 	// Get all the available nomad clients that should be running logspout
-	nomad, err := api.NewClient(&api.Config{
-		Address: *addr,
-		SecretID: *token,		
-		TLSConfig: &api.TLSConfig{
-			Insecure: *insecure,
-			ClientCert: *cert,
-			ClientKey:  *key,
-		},
-	})
+	nomad, err := api.NewClient(config)
 	if err != nil {
 		fmt.Println("Error creating Nomad client: ", err)
 	}
