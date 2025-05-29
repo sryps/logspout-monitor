@@ -1,21 +1,21 @@
 package main
 
-
 import (
 	"flag"
 	"fmt"
+	"log"
+	"net/http"
+	"time"
+
 	"github.com/hashicorp/nomad/api"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"net/http"
-	"time"
-	"log"
 )
 
 type NomadClient struct {
-	NodeID   string `json:"NodeID"`
-	NodeName string `json:"NodeName"`
-	JobStatus bool `json:"JobStatus"`
+	NodeID    string `json:"NodeID"`
+	NodeName  string `json:"NodeName"`
+	JobStatus bool   `json:"JobStatus"`
 }
 
 type NomadClients []NomadClient
@@ -53,30 +53,13 @@ func main() {
 		fmt.Println("Error creating Nomad client: ", err)
 	}
 
-	var Clients NomadClients
-	// Get the nomad clients
-	nomadClients, err := GetClientList(nomad)
-	if err != nil {
-		fmt.Println("Error getting nomad clients: ", err)
-	}
-	
-	Clients, err = CheckNomadJobStatus(nomad, nomadClients, jobName)
-	if err != nil {
-		fmt.Println("Error checking nomad job status: ", err)
-	}
-
-	// Print the nomad clients
-	for _, client := range Clients {
-		fmt.Printf("NodeID: %s, NodeName: %s, JobStatus: %t\n", client.NodeID, client.NodeName, client.JobStatus)
-	}
-
-		initMetrics()
+	initMetrics()
 
 	// Refresh metrics every 30s
 	go func() {
 		for {
 			updateClientStatus(nomad, jobName)
-			time.Sleep(1 * time.Hour)
+			time.Sleep(30 * time.Second)
 		}
 	}()
 
@@ -105,12 +88,12 @@ func CheckNomadJobStatus(nomad *api.Client, clientsList []*api.NodeListStub, job
 		for _, allocation := range allocations {
 			if allocation.NodeName == client.Name {
 				jobStatus = true
-			} 
+			}
 		}
-		
+
 		Clients = append(Clients, NomadClient{
-			NodeID:   client.ID,
-			NodeName: client.Name,
+			NodeID:    client.ID,
+			NodeName:  client.Name,
 			JobStatus: jobStatus,
 		})
 		jobStatus = false
@@ -118,7 +101,6 @@ func CheckNomadJobStatus(nomad *api.Client, clientsList []*api.NodeListStub, job
 
 	return Clients, nil
 }
-
 
 var (
 	nodeStatusGauge = prometheus.NewGaugeVec(
@@ -138,30 +120,41 @@ func initMetrics() {
 
 func updateClientStatus(nomad *api.Client, jobName *string) {
 	now := time.Now()
-	fmt.Println(now.Format(time.RFC3339) , " - Updating client status...")
-	clients, err := GetClientList(nomad)
-	time.Sleep(2 * time.Second)
+	fmt.Println(now.Format(time.RFC3339), " - Updating client status...")
+	// -- get all the available nomad clients that should be running logspout
+	nomadClients, err := GetClientList(nomad)
 	if err != nil {
 		fmt.Println("Error getting nomad clients: ", err)
+		// -- if we can't get the clients, we will wait for 2 seconds and try again
+		fmt.Println("Retrying in 2 seconds...")
+		time.Sleep(2 * time.Second)
+	} else {
+		fmt.Println("Found", len(nomadClients), "nomad clients")
 	}
-
-	for _, client := range clients {
+	// -- get all the allocations for the specified job
+	allocations, _, err := nomad.Jobs().Allocations(*jobName, true, nil)
+	if err != nil {
+		fmt.Println("Error getting allocations: ", err)
+	} else {
+		fmt.Println("Found", len(allocations), "allocations for job", *jobName)
+	}
+	// -- check that each client has the allocation, otherwise update to false
+	for _, client := range nomadClients {
 		jobStatus := false
-		allocations, _, err := nomad.Jobs().Allocations(*jobName, true, nil)
-		if err != nil {
-			fmt.Println("Error getting allocations: ", err)
-		}
 		for _, allocation := range allocations {
-			if allocation.NodeName == client.Name {
+			//fmt.Printf("NodeID: %s, NodeName: %s, ClientStatus: %s\n", client.ID, client.Name, allocation.ClientStatus)
+
+			if allocation.NodeName == client.Name && allocation.ClientStatus == "running" {
 				jobStatus = true
-			} 
+				break
+			}
 		}
-		
+		// -- update the metrics
 		if jobStatus {
 			nodeStatusGauge.WithLabelValues(client.ID, client.Name).Set(1)
 		} else {
 			nodeStatusGauge.WithLabelValues(client.ID, client.Name).Set(0)
 		}
+		fmt.Printf("NodeID: %s, NodeName: %s, JobStatus: %t\n", client.ID, client.Name, jobStatus)
 	}
 }
-	
